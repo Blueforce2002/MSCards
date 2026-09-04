@@ -547,6 +547,8 @@ def find_product_url(cardmarket_name, card_number, set_code):
             timeout=10,
         )
         edges = resp.json().get("data", {}).get("products", {}).get("edges", [])
+        print(f"🔍 Leder efter præcis titel: '{expected_title}'")
+        print(f"🔍 Kandidater fundet i Shopify: {[e['node']['title'] for e in edges]}")
 
         for edge in edges:
             if edge["node"]["title"].strip() == expected_title:
