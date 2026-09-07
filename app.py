@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime
 
 from flask import Flask, request, jsonify
@@ -589,24 +590,14 @@ def send_email(to_email, subject, html_body=None, template_variables=None):
     return response.status_code, response.text
 
 
-@app.route("/notify-check", methods=["GET"])
-def notify_check():
-    """
-    Manuel test-udgave: /notify-check?card_id=123
-    Finder alle der har det kort på ønskelisten (med samtykke, ikke allerede
-    kontaktet), sender en mail, og markerer dem som kontaktet.
-    Kaldes senere automatisk fra sync-scriptet i stedet for manuelt.
-    """
-    card_id = request.args.get("card_id")
-    if not card_id:
-        return jsonify({"error": "card_id er påkrævet"}), 400
-
+def _run_notify_check(card_id):
+    """Selve logikken - finder matches, sender mails, markerer som kontaktet."""
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT cardmarket_name, card_number, image_url, set_name, set_code FROM set_cards WHERE id = %s;", (card_id,))
             card = cur.fetchone()
             if not card:
-                return jsonify({"error": "Kort ikke fundet"}), 404
+                return {"error": "Kort ikke fundet"}, 404
 
             cur.execute("""
                 SELECT w.id AS wishlist_id, ncc.email
@@ -645,7 +636,55 @@ def notify_check():
         else:
             errors.append({"email": m["email"], "status": status, "body": body})
 
-    return jsonify({"matches_found": len(matches), "emails_sent": sent, "errors": errors})
+    return {"matches_found": len(matches), "emails_sent": sent, "errors": errors}, 200
+
+
+@app.route("/notify-check", methods=["GET"])
+def notify_check():
+    """Manuel test-udgave: /notify-check?card_id=123"""
+    card_id = request.args.get("card_id")
+    if not card_id:
+        return jsonify({"error": "card_id er påkrævet"}), 400
+    body, status = _run_notify_check(card_id)
+    return jsonify(body), status
+
+
+@app.route("/notify-check-by-title", methods=["POST"])
+def notify_check_by_title():
+    """
+    Kaldes af jeres daglige sync-script, hver gang et produkt sættes til
+    'active' med lager > 0. Body: { "title": "Alakazam (BS 1)" }
+    Finder selv det rigtige kort ud fra titlen - scriptet skal ikke kende
+    vores interne card_id.
+    """
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+
+    match = re.match(r"^(.+?)\s+\(([A-Za-z0-9]+)\s+(\d+)\)$", title)
+    if not match:
+        return jsonify({"skipped": True, "reason": "Titel matcher ikke det forventede format (Navn (KODE NR))"}), 200
+
+    name, code, number = match.groups()
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, card_number FROM set_cards WHERE cardmarket_name = %s AND set_code = %s;
+            """, (name, code))
+            candidates = cur.fetchall()
+
+    card_id = None
+    for c in candidates:
+        stored = c["card_number"]
+        if stored.isdigit() and number.isdigit() and int(stored) == int(number):
+            card_id = c["id"]
+            break
+
+    if not card_id:
+        return jsonify({"skipped": True, "reason": "Intet matchende kort fundet i kataloget", "parsed": {"name": name, "code": code, "number": number}}), 200
+
+    body, status = _run_notify_check(card_id)
+    return jsonify(body), status
 
 
 # Opret tabellerne så snart appen starter op på Render.
