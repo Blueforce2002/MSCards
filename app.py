@@ -1,5 +1,8 @@
 import os
 import re
+import hmac
+import hashlib
+import base64
 from datetime import datetime
 
 from flask import Flask, request, jsonify
@@ -86,6 +89,9 @@ def init_db():
             """)
             cur.execute("""
                 ALTER TABLE customer_wishlist ADD COLUMN IF NOT EXISTS notified BOOLEAN NOT NULL DEFAULT FALSE;
+            """)
+            cur.execute("""
+                ALTER TABLE customer_wishlist ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP;
             """)
             cur.execute("""
                 ALTER TABLE customer_notify_consent ADD COLUMN IF NOT EXISTS email TEXT;
@@ -603,7 +609,9 @@ def _run_notify_check(card_id):
                 SELECT w.id AS wishlist_id, ncc.email
                 FROM customer_wishlist w
                 JOIN customer_notify_consent ncc ON ncc.customer_id = w.customer_id
-                WHERE w.card_id = %s AND w.notified = FALSE AND ncc.consent = TRUE AND ncc.email IS NOT NULL AND ncc.email != '';
+                WHERE w.card_id = %s
+                  AND (w.notified = FALSE OR w.notified_at < NOW() - INTERVAL '3 days')
+                  AND ncc.consent = TRUE AND ncc.email IS NOT NULL AND ncc.email != '';
             """, (card_id,))
             matches = cur.fetchall()
 
@@ -631,7 +639,7 @@ def _run_notify_check(card_id):
             sent += 1
             with get_db() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("UPDATE customer_wishlist SET notified = TRUE WHERE id = %s;", (m["wishlist_id"],))
+                    cur.execute("UPDATE customer_wishlist SET notified = TRUE, notified_at = NOW() WHERE id = %s;", (m["wishlist_id"],))
                 conn.commit()
         else:
             errors.append({"email": m["email"], "status": status, "body": body})
@@ -685,6 +693,64 @@ def notify_check_by_title():
 
     body, status = _run_notify_check(card_id)
     return jsonify(body), status
+
+
+SHOPIFY_WEBHOOK_SECRET = os.environ.get("SHOPIFY_WEBHOOK_SECRET")
+
+
+def verify_shopify_webhook(request):
+    """Bekræfter at kaldet reelt kommer fra Shopify, ikke bare nogen der har
+    gættet URL'en. Shopify signerer hver webhook-besked med jeres hemmelige
+    nøgle - matcher signaturen ikke, afviser vi kaldet."""
+    if not SHOPIFY_WEBHOOK_SECRET:
+        return False
+    hmac_header = request.headers.get("X-Shopify-Hmac-Sha256", "")
+    digest = hmac.new(SHOPIFY_WEBHOOK_SECRET.encode("utf-8"), request.get_data(), hashlib.sha256).digest()
+    computed_hmac = base64.b64encode(digest).decode("utf-8")
+    return hmac.compare_digest(computed_hmac, hmac_header)
+
+
+@app.route("/webhooks/order-paid", methods=["POST"])
+def webhook_order_paid():
+    """
+    Kaldes automatisk af Shopify, hver gang en ordre bliver betalt. Fjerner
+    de købte kort fra kundens ønskeliste, så vores "prøv igen efter 3 dage"-
+    logik aldrig sender en ny mail om noget, de allerede har fået fat i.
+    """
+    if not verify_shopify_webhook(request):
+        return jsonify({"error": "Ugyldig signatur"}), 401
+
+    order = request.get_json(silent=True) or {}
+    customer_id = str((order.get("customer") or {}).get("id", "")).strip()
+    if not customer_id:
+        return jsonify({"skipped": True, "reason": "Ingen kunde tilknyttet ordren"}), 200
+
+    removed = 0
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            for line_item in order.get("line_items", []):
+                title = (line_item.get("title") or "").strip()
+                match = re.match(r"^(.+?)\s+\(([A-Za-z0-9]+)\s+(\d+)\)$", title)
+                if not match:
+                    continue
+                name, code, number = match.groups()
+
+                cur.execute("""
+                    SELECT id, card_number FROM set_cards WHERE cardmarket_name = %s AND set_code = %s;
+                """, (name, code))
+                candidates = cur.fetchall()
+
+                for c in candidates:
+                    stored = c["card_number"]
+                    if stored.isdigit() and number.isdigit() and int(stored) == int(number):
+                        cur.execute("""
+                            DELETE FROM customer_wishlist WHERE customer_id = %s AND card_id = %s;
+                        """, (customer_id, c["id"]))
+                        removed += cur.rowcount
+                        break
+        conn.commit()
+
+    return jsonify({"success": True, "removed_from_wishlist": removed})
 
 
 # Opret tabellerne så snart appen starter op på Render.
