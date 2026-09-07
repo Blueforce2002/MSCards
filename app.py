@@ -525,7 +525,11 @@ def find_product_url(cardmarket_name, card_number, set_code):
         if not token:
             return None
 
-        expected_title = f"{cardmarket_name} ({set_code} {card_number})"
+        # Jeres rigtige produkter bruger kortnummeret UDEN foranstillede
+        # nuller (fx "Alakazam (BS 1)"), mens vores katalog gemmer det som
+        # PokéWallet leverer det (fx "001") - så vi fjerner nullerne her.
+        card_number_no_zeros = str(int(card_number)) if card_number.isdigit() else card_number
+        expected_title = f"{cardmarket_name} ({set_code} {card_number_no_zeros})"
 
         headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
         graphql_query = """
