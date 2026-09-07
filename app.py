@@ -470,7 +470,7 @@ def get_notify_consent():
         with conn.cursor() as cur:
             cur.execute("SELECT consent FROM customer_notify_consent WHERE customer_id = %s;", (customer_id,))
             row = cur.fetchone()
-    response = jsonify({"consent": bool(row["consent"]) if row else False})
+    response = jsonify({"consent": bool(row["consent"]) if row else True, "has_preference": row is not None})
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
 
