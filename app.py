@@ -802,6 +802,24 @@ def cleanup_duplicate_names():
                         break
 
                 if clean_counterpart and clean_counterpart.get("image_url"):
+                    # Flyt evt. "ejet i samling"- og "ønske"-markeringer over
+                    # på det rene kort, før det beskidte slettes - ellers
+                    # nægter databasen (med rette) at slette, og en kundes
+                    # markering ville gå tabt.
+                    cur.execute("""
+                        INSERT INTO customer_collection (customer_id, card_id, owned, updated_at)
+                        SELECT customer_id, %s, owned, updated_at FROM customer_collection WHERE card_id = %s
+                        ON CONFLICT (customer_id, card_id) DO NOTHING;
+                    """, (clean_counterpart["id"], card["id"]))
+                    cur.execute("DELETE FROM customer_collection WHERE card_id = %s;", (card["id"],))
+
+                    cur.execute("""
+                        INSERT INTO customer_wishlist (customer_id, card_id, added_at, notified, notified_at)
+                        SELECT customer_id, %s, added_at, notified, notified_at FROM customer_wishlist WHERE card_id = %s
+                        ON CONFLICT (customer_id, card_id) DO NOTHING;
+                    """, (clean_counterpart["id"], card["id"]))
+                    cur.execute("DELETE FROM customer_wishlist WHERE card_id = %s;", (card["id"],))
+
                     cur.execute("DELETE FROM set_cards WHERE id = %s;", (card["id"],))
                     deleted += 1
                 else:
