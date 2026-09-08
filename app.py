@@ -753,6 +753,68 @@ def webhook_order_paid():
     return jsonify({"success": True, "removed_from_wishlist": removed})
 
 
+@app.route("/set-cards/cleanup-duplicate-names", methods=["POST"])
+def cleanup_duplicate_names():
+    """
+    Engangs-oprydning: retter kort, der blev gemt med en overflødig,
+    dobbelt "(KODE NR)"-parentes i cardmarket_name FØR navne-fixet i
+    populate_set_v3.py (fx "Tropius (PBL 001)" i stedet for bare
+    "Tropius" for et kort med card_number "001").
+
+    For hvert "beskidt" kort:
+    - Findes der allerede en "ren" udgave af samme kort (samme sæt +
+      nummer, uden den overflødige parentes) MED et gyldigt billede,
+      slettes den beskidte dublet.
+    - Findes der IKKE en ren udgave, renses navnet i stedet for at
+      slette rækken, så kortet ikke forsvinder helt.
+
+    Body: { "set_name": "PBL" } (valgfrit - udelades, ryddes ALLE sæt op)
+    """
+    data = request.get_json(silent=True) or {}
+    set_name_filter = data.get("set_name")
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            if set_name_filter:
+                cur.execute("SELECT * FROM set_cards WHERE set_name = %s;", (set_name_filter,))
+            else:
+                cur.execute("SELECT * FROM set_cards;")
+            all_cards = cur.fetchall()
+
+            deleted = 0
+            renamed = 0
+
+            for card in all_cards:
+                match = re.search(r"^(.*)\s+\(([^)]*)\)$", card["cardmarket_name"])
+                if not match:
+                    continue
+                clean_name, paren_content = match.groups()
+                if card["card_number"] not in paren_content:
+                    continue  # parentesen er ikke den overflødige type - lad den være
+
+                clean_counterpart = None
+                for other in all_cards:
+                    if (other["id"] != card["id"]
+                            and other["set_name"] == card["set_name"]
+                            and other["card_number"] == card["card_number"]
+                            and other["cardmarket_name"] == clean_name):
+                        clean_counterpart = other
+                        break
+
+                if clean_counterpart and clean_counterpart.get("image_url"):
+                    cur.execute("DELETE FROM set_cards WHERE id = %s;", (card["id"],))
+                    deleted += 1
+                else:
+                    cur.execute("""
+                        UPDATE set_cards SET cardmarket_name = %s WHERE id = %s;
+                    """, (clean_name, card["id"]))
+                    renamed += 1
+
+        conn.commit()
+
+    return jsonify({"success": True, "deleted_duplicates": deleted, "renamed_in_place": renamed})
+
+
 # Opret tabellerne så snart appen starter op på Render.
 init_db()
 
