@@ -833,6 +833,30 @@ def cleanup_duplicate_names():
     return jsonify({"success": True, "deleted_duplicates": deleted, "renamed_in_place": renamed})
 
 
+@app.route("/set-cards/rename-set", methods=["POST"])
+def rename_set():
+    """
+    Omdøber alle kort fra ét sæt-navn til et andet - bruges når PokéWallet
+    og resten af systemet er en anelse uenige om stavemåden (fx "Mega
+    Evolution Promo" vs. "Mega Evolution Promos"). Rører ikke billeder
+    eller Shopify - kun selve navnet i vores egen database.
+    Body: { "old_name": "Mega Evolution Promo", "new_name": "Mega Evolution Promos" }
+    """
+    data = request.get_json(silent=True) or {}
+    old_name = data.get("old_name")
+    new_name = data.get("new_name")
+    if not old_name or not new_name:
+        return jsonify({"error": "old_name og new_name er påkrævet"}), 400
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE set_cards SET set_name = %s WHERE set_name = %s;", (new_name, old_name))
+            updated = cur.rowcount
+        conn.commit()
+
+    return jsonify({"success": True, "updated": updated})
+
+
 # Opret tabellerne så snart appen starter op på Render.
 init_db()
 
