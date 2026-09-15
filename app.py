@@ -267,6 +267,10 @@ def backfill_set_code():
 # (fx Brilliant Stars/Astral Radiances fælles "Trainer Gallery").
 GALLERY_COMPANIONS = {
     "Crown Zenith": "Crown Zenith: Galarian Gallery",
+    "Brilliant Stars": "Brilliant Stars Trainer Gallery",
+    "Astral Radiance": "Astral Radiance Trainer Gallery",
+    "Lost Origin": "Lost Origin Trainer Gallery",
+    "Silver Tempest": "Silver Tempest Trainer Gallery",
 }
 
 
