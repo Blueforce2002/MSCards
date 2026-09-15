@@ -3,11 +3,13 @@ import re
 import hmac
 import hashlib
 import base64
+from contextlib import contextmanager
 from datetime import datetime
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import psycopg2
+import psycopg2.pool
 from psycopg2.extras import RealDictCursor
 import requests
 
@@ -22,10 +24,29 @@ CORS(app, resources={r"/*": {"origins": [
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+# Genbruger et lille antal åbne forbindelser i stedet for at oprette (og
+# lukke) en helt ny forbindelse til Postgres ved hvert eneste kald - det
+# sparer en mærkbar mængde tid pr. kald, især når mange kald sker hurtigt
+# efter hinanden (fx populate_set_v3.py, der rammer backend'en for hvert kort).
+_db_pool = psycopg2.pool.SimpleConnectionPool(
+    1, 10, DATABASE_URL, cursor_factory=RealDictCursor
+)
 
+
+@contextmanager
 def get_db():
-    """Åbner en ny forbindelse til Postgres-databasen på Render."""
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    """Låner en forbindelse fra puljen, og afleverer den igen bagefter -
+    virker præcis som før udadtil (`with get_db() as conn:`), så resten af
+    koden i denne fil skal ikke ændres."""
+    conn = _db_pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _db_pool.putconn(conn)
 
 
 def init_db():
