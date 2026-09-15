@@ -262,20 +262,31 @@ def backfill_set_code():
     return jsonify({"success": True, "updated": updated})
 
 
+# Kendte "galleri"-undersæt, der hører til et hovedsæt (fx Crown Zeniths
+# Galarian Gallery). Udvid listen her, når I støder på flere af samme type
+# (fx Brilliant Stars/Astral Radiances fælles "Trainer Gallery").
+GALLERY_COMPANIONS = {
+    "Crown Zenith": "Crown Zenith: Galarian Gallery",
+}
+
+
 @app.route("/set-cards", methods=["GET"])
 def get_set_cards():
     """
     Henter kortkataloget for ét sæt.
-    /set-cards?set=Crown%20Zenith&promo=true
+    /set-cards?set=Crown%20Zenith&promo=true&gallery=true
     """
     set_name = request.args.get("set", "").strip()
     include_promo = request.args.get("promo", "false").lower() == "true"
+    include_gallery = request.args.get("gallery", "false").lower() == "true"
     if not set_name:
         return jsonify({"error": "set er påkrævet"}), 400
 
     set_names = [set_name]
     if include_promo:
         set_names.append(f"{set_name} Promos")
+    if include_gallery and set_name in GALLERY_COMPANIONS:
+        set_names.append(GALLERY_COMPANIONS[set_name])
 
     with get_db() as conn:
         with conn.cursor() as cur:
@@ -291,16 +302,19 @@ def get_set_cards():
 
 @app.route("/collection", methods=["GET"])
 def get_collection():
-    """/collection?customer_id=123&set=Base%20Set&promo=true"""
+    """/collection?customer_id=123&set=Base%20Set&promo=true&gallery=true"""
     customer_id = request.args.get("customer_id", "").strip()
     set_name = request.args.get("set", "").strip()
     include_promo = request.args.get("promo", "false").lower() == "true"
+    include_gallery = request.args.get("gallery", "false").lower() == "true"
     if not customer_id or not set_name:
         return jsonify({"error": "customer_id og set er påkrævet"}), 400
 
     set_names = [set_name]
     if include_promo:
         set_names.append(f"{set_name} Promos")
+    if include_gallery and set_name in GALLERY_COMPANIONS:
+        set_names.append(GALLERY_COMPANIONS[set_name])
 
     with get_db() as conn:
         with conn.cursor() as cur:
