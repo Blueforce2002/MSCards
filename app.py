@@ -896,6 +896,54 @@ def rename_set():
     return jsonify({"success": True, "updated": updated})
 
 
+# Samme nøgleord-liste som i populate_set_v3.py, bruges her til at rydde
+# op i sealed-produkter der allerede nåede at blive gemt som "kort", før
+# filteret fandtes i selve hente-scriptet.
+SEALED_PRODUCT_KEYWORDS = [
+    "booster box", "booster pack", "booster case", "elite trainer box",
+    "theme deck", "build and battle", "collector", "premium collection",
+    "checklane blister", "pack blister", "sleeved booster", "display case",
+    " box case", " tin", " blister", " deck display", " v box", " ex box",
+    " box)", " case)",
+]
+
+
+@app.route("/set-cards/remove-sealed-products", methods=["POST"])
+def remove_sealed_products():
+    """
+    Engangs-oprydning: fjerner kort, hvis navn ligner et sealed-produkt
+    (booster box, blister, tin osv.) i stedet for et rigtigt kort - de blev
+    ved en fejl gemt som "kort", før filteret fandtes i selve hente-scriptet.
+    Fjerner først evt. samlings-/ønske-referencer, så sletningen ikke
+    fejler på en fremmednøgle-fejl.
+    Body: { "set_name": "Vivid Voltage" } (valgfrit - udelades, tjekkes ALLE sæt)
+    """
+    data = request.get_json(silent=True) or {}
+    set_name_filter = data.get("set_name")
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            if set_name_filter:
+                cur.execute("SELECT id, cardmarket_name FROM set_cards WHERE set_name = %s;", (set_name_filter,))
+            else:
+                cur.execute("SELECT id, cardmarket_name FROM set_cards;")
+            all_cards = cur.fetchall()
+
+            to_remove = [
+                c["id"] for c in all_cards
+                if any(kw in c["cardmarket_name"].lower() for kw in SEALED_PRODUCT_KEYWORDS)
+            ]
+
+            if to_remove:
+                cur.execute("DELETE FROM customer_collection WHERE card_id = ANY(%s);", (to_remove,))
+                cur.execute("DELETE FROM customer_wishlist WHERE card_id = ANY(%s);", (to_remove,))
+                cur.execute("DELETE FROM set_cards WHERE id = ANY(%s);", (to_remove,))
+
+        conn.commit()
+
+    return jsonify({"success": True, "removed": len(to_remove)})
+
+
 # Opret tabellerne så snart appen starter op på Render.
 init_db()
 
