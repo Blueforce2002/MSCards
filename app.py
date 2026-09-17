@@ -907,7 +907,7 @@ SEALED_PRODUCT_KEYWORDS = [
     " box)", " case)", "fun pack", "pin collection", "starter deck",
     "battle deck", "gift set", "special collection", "trainer box",
     "battle arena deck", "value pack", "hanger pack",
-    "collection", "figure", "bundle",
+    "collection", "figure", "bundle", " box", " deck",
 ]
 
 
