@@ -904,7 +904,9 @@ SEALED_PRODUCT_KEYWORDS = [
     "theme deck", "build and battle", "collector", "premium collection",
     "checklane blister", "pack blister", "sleeved booster", "display case",
     " box case", " tin", " blister", " deck display", " v box", " ex box",
-    " box)", " case)",
+    " box)", " case)", "fun pack", "pin collection", "starter deck",
+    "battle deck", "gift set", "special collection", "trainer box",
+    "battle arena deck", "value pack", "hanger pack",
 ]
 
 
